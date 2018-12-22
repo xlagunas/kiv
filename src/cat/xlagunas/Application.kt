@@ -16,8 +16,8 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
-import kotlinx.coroutines.experimental.channels.consumeEach
-import kotlinx.coroutines.experimental.channels.mapNotNull
+import kotlinx.coroutines.channels.consumeEach
+import kotlinx.coroutines.channels.mapNotNull
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import java.time.Duration
@@ -36,14 +36,14 @@ fun Application.module(testing: Boolean = false) {
     }
 
     install(WebSockets) {
-        pingPeriod = Duration.ofSeconds(15)
-        timeout = Duration.ofSeconds(15)
+        val timeouts = if (testing) 2L else 15L
+        pingPeriod = Duration.ofSeconds(timeouts)
+        timeout = Duration.ofSeconds(timeouts)
         maxFrameSize = Long.MAX_VALUE
         masking = false
     }
 
     val roomService = RoomService()
-    val userSessions = ConcurrentHashMap<String, User>()
     val gsonParser = Gson()
     val log = LoggerFactory.getLogger(this::class.java)
 

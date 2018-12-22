@@ -1,6 +1,7 @@
 package cat.xlagunas
 
 import com.google.gson.Gson
+import com.google.gson.annotations.SerializedName
 import io.ktor.http.cio.websocket.Frame
 import io.ktor.http.cio.websocket.WebSocketSession
 import java.util.concurrent.ConcurrentHashMap
@@ -50,13 +51,12 @@ class RoomService {
     }
 
     suspend private fun sendRoomStatus(roomId: String, userId: String) {
-//        val message = Message(
-//            destination = userId,
-//            from = "SERVER",
-//            data = "Total users on Room ${roomId} is ${findOrCreateRoom(roomId).participants.size}"
-//        )
         val roomAttendants = room[roomId]?.participants?.keys()?.toList()?.map { RoomParticipant(it) }
-        getUserOnRoom(roomId, userId).sessions.forEach { it.send(Frame.Text(Gson().toJson(roomAttendants))) }
+        if (roomAttendants != null) {
+            val roomUsers = RoomUsers(roomAttendants)
+            getUserOnRoom(roomId, userId).sessions
+                .forEach { it.send(Frame.Text(Gson().toJson(roomUsers))) }
+        }
     }
 
     private suspend fun sendBroadcastMessage(roomId: String, userId: String, msg: String) {
@@ -80,6 +80,8 @@ class RoomService {
 }
 
 data class Room(val id: String, val participants: ConcurrentHashMap<String, User> = ConcurrentHashMap())
+
+data class RoomUsers(@SerializedName("participants") val connectedUsers: List<RoomParticipant>)
 
 data class User(val id: String, val sessions: MutableList<WebSocketSession> = ArrayList()) {
     fun addSession(socket: WebSocketSession) {
