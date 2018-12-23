@@ -1,8 +1,8 @@
 package cat.xlagunas
 
+import cat.xlagunas.model.*
 import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
-import io.ktor.http.cio.websocket.Frame
+import converter.FrameConverter
 import io.ktor.http.cio.websocket.WebSocketSession
 import java.util.concurrent.ConcurrentHashMap
 
@@ -10,8 +10,8 @@ class RoomService {
 
     private val room = ConcurrentHashMap<String, Room>()
 
-    //TODO Dependency injection for reuse of instances!
     private val gsonParser = Gson()
+    private val frameConverter = FrameConverter(gsonParser)
 
     private fun findOrCreateRoom(roomId: String): Room {
         return room.getOrPut(roomId) { Room(roomId) }
@@ -39,14 +39,11 @@ class RoomService {
     suspend fun handleMessage(
         roomId: String,
         userId: String,
-        msg: Message
+        msg: MessageFrame
     ) {
-        val message = msg.copy(from = userId)
-
-        when (msg.destination.toLowerCase()) {
-            JOIN -> sendRoomStatus(roomId, userId)
-            BROADCAST_MESSAGE -> sendBroadcastMessage(roomId, userId, gsonParser.toJson(message))
-            else -> sendDirectMessage(roomId, msg.destination, gsonParser.toJson(message))
+        when (msg.type) {
+            MessageType.ROOM_DISCOVERY -> sendRoomStatus(roomId, userId)
+            else -> sendDirectMessage(roomId, msg.to, msg)
         }
     }
 
@@ -54,45 +51,20 @@ class RoomService {
         val roomAttendants = room[roomId]?.participants?.keys()?.toList()?.map { RoomParticipant(it) }
         if (roomAttendants != null) {
             val roomUsers = RoomUsers(roomAttendants)
-            getUserOnRoom(roomId, userId).sessions
-                .forEach { it.send(Frame.Text(Gson().toJson(roomUsers))) }
+            val roomStatusMessage = MessageFrame(
+                SERVER_SENDER, userId, MessageType.ROOM_DISCOVERY, gsonParser.toJson(roomUsers)
+            )
+
+            getUserOnRoom(roomId, userId).sessions.forEach { it.send(frameConverter.convertToFrame(roomStatusMessage)) }
         }
     }
 
-    private suspend fun sendBroadcastMessage(roomId: String, userId: String, msg: String) {
-        findOrCreateRoom(roomId).participants
-            .filterNot { it.key == userId }
-            .forEach {
-                it.value.sendMessage(Frame.Text(msg))
-            }
-    }
-
-    private suspend fun sendDirectMessage(roomId: String, receiverId: String, msg: String) {
-        val frame = Frame.Text(msg)
-
+    private suspend fun sendDirectMessage(roomId: String, receiverId: String, msg: MessageFrame) {
+        val frame = frameConverter.convertToFrame(msg)
         findOrCreateRoom(roomId).participants[receiverId]?.sendMessage(frame)
     }
 
     companion object {
-        const val BROADCAST_MESSAGE = "broadcast"
-        const val JOIN = "join"
-    }
-}
-
-data class Room(val id: String, val participants: ConcurrentHashMap<String, User> = ConcurrentHashMap())
-
-data class RoomUsers(@SerializedName("participants") val connectedUsers: List<RoomParticipant>)
-
-data class User(val id: String, val sessions: MutableList<WebSocketSession> = ArrayList()) {
-    fun addSession(socket: WebSocketSession) {
-        sessions += socket
-    }
-
-    fun removeSession(socket: WebSocketSession) {
-        sessions -= socket
-    }
-
-    suspend fun sendMessage(msg: Frame.Text) {
-        sessions.forEach { it.send(msg) }
+        const val SERVER_SENDER = "SERVER"
     }
 }

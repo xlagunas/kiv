@@ -1,7 +1,7 @@
 package cat.xlagunas
 
+import cat.xlagunas.model.MessageFrame
 import com.google.gson.Gson
-import com.google.gson.annotations.SerializedName
 import io.ktor.application.Application
 import io.ktor.application.install
 import io.ktor.features.CallLogging
@@ -21,7 +21,6 @@ import kotlinx.coroutines.channels.mapNotNull
 import org.slf4j.LoggerFactory
 import org.slf4j.event.Level
 import java.time.Duration
-import java.util.concurrent.ConcurrentHashMap
 
 fun main(args: Array<String>) {
     embeddedServer(Netty, commandLineEnvironment(args)).start()
@@ -63,7 +62,7 @@ fun Application.module(testing: Boolean = false) {
             try {
                 roomService.addUser(roomId, userId, this)
                 incoming.mapNotNull { it as? Frame.Text }.consumeEach { frame ->
-                    val message = gsonParser.fromJson(frame.readText(), Message::class.java)
+                    val message = gsonParser.fromJson(frame.readText(), MessageFrame::class.java)
                     log.info("Message from: $userId: $message")
                     roomService.handleMessage(roomId, userId, message)
                 }
@@ -74,18 +73,4 @@ fun Application.module(testing: Boolean = false) {
         }
     }
 }
-
-data class Message(
-    @SerializedName("destination")
-    var destination: String,
-
-    @SerializedName("data")
-    var data: String,
-
-    @SerializedName("from")
-    var from: String = ""
-)
-
-data class RoomParticipant(@SerializedName("userId") val userId: String)
-
 

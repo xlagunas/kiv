@@ -1,13 +1,15 @@
 package cat.xlagunas
 
-import cat.xlagunas.RoomService.Companion.JOIN
+import cat.xlagunas.model.MessageFrame
+import cat.xlagunas.model.MessageType
+import cat.xlagunas.model.RoomParticipant
+import cat.xlagunas.model.RoomUsers
 import com.google.gson.Gson
+import converter.FrameConverter
 import io.ktor.http.cio.websocket.Frame
 import io.ktor.http.cio.websocket.readText
 import io.ktor.server.testing.withTestApplication
 import kotlinx.coroutines.channels.consumeEachIndexed
-import kotlinx.coroutines.channels.filter
-import kotlinx.coroutines.channels.filterNotNull
 import kotlinx.coroutines.channels.mapNotNull
 import org.junit.Test
 import kotlin.test.assertEquals
@@ -15,23 +17,27 @@ import kotlin.test.assertNotNull
 
 class ApplicationTest {
 
+    private val gson = Gson()
+    private val converter = FrameConverter(gson)
+
     @Test
     fun givenEmptyRoom_whenNewUser_thenUserAdded() {
         withTestApplication({ module(testing = true) }) {
-            lateinit var message: RoomUsers
+            lateinit var message: MessageFrame
             val expected = RoomUsers(listOf(RoomParticipant("user1")))
-            val gson = Gson()
-
 
             handleWebSocketConversation("/testRoom/user1") { incoming, outgoing ->
-                outgoing.send(Frame.Text(gson.toJson(Message(JOIN, "me", ""))))
-                val sentText = (incoming.filterNotNull().filter { it is Frame.Text }.receive() as Frame.Text).readText()
-                message = gson.fromJson(sentText, RoomUsers::class.java)
+                outgoing.send(
+                    converter
+                        .convertToFrame(MessageFrame("user1", "", MessageType.ROOM_DISCOVERY, ""))
+                )
+                val sentText = incoming.mapNotNull { it as? Frame.Text }.receive()
+                message = converter.extractFrame(sentText)
             }
 
             assertEquals(
                 expected,
-                message,
+                gson.fromJson(message.data, RoomUsers::class.java),
                 "Unexpected number of users in the room"
             )
         }
@@ -44,29 +50,27 @@ class ApplicationTest {
 
             lateinit var registerMessageToUser1: RoomUsers
             lateinit var registerMessageToUser2: RoomUsers
-            val sentMessageToUser2 = Message("user2", "this is a test message", "user1")
-            lateinit var messageReceivedToUser2: Message
+            val sentMessageToUser2 = MessageFrame("user1", "user2", MessageType.OFFER, "this is a test message")
+            lateinit var messageReceivedToUser2: MessageFrame
 
             handleWebSocketConversation("/testRoom/user1") { incoming, outgoing ->
-                outgoing.send(Frame.Text(gson.toJson(Message(JOIN, "me"))))
+                outgoing.send(converter.convertToFrame(MessageFrame("user1", "", MessageType.ROOM_DISCOVERY, "")))
 
                 handleWebSocketConversation("/testRoom/user2") { incoming2, outgoing2 ->
-
-                    outgoing2.send(Frame.Text(gson.toJson(Message(JOIN, "me"))))
-                    val msg = gson.toJson(sentMessageToUser2)
-                    outgoing.send(Frame.Text(msg))
+                    outgoing2.send(converter.convertToFrame(MessageFrame("user2", "", MessageType.ROOM_DISCOVERY, "")))
+                    outgoing.send(converter.convertToFrame(sentMessageToUser2))
 
                     incoming.mapNotNull { it as? Frame.Text }.consumeEachIndexed {
-                        val frameContent = (it.value as Frame.Text).readText()
+                        val frameContent = it.value.readText()
                         registerMessageToUser1 = gson.fromJson(frameContent, RoomUsers::class.java)
                     }
 
                     incoming2.mapNotNull { it as? Frame.Text }.consumeEachIndexed {
-                        val frameContent = (it.value as Frame.Text).readText()
                         if (it.index == 0) {
-                            registerMessageToUser2 = gson.fromJson(frameContent, RoomUsers::class.java)
+                            val receivedHelloMessage = converter.extractFrame(it.value)
+                            registerMessageToUser2 = gson.fromJson(receivedHelloMessage.data, RoomUsers::class.java)
                         } else {
-                            messageReceivedToUser2 = gson.fromJson(frameContent, Message::class.java)
+                            messageReceivedToUser2 = converter.extractFrame(it.value)
                         }
                     }
                 }
